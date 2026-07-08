@@ -185,12 +185,50 @@ def criar_sb(url: str, key: str) -> Client:
 
 
 def tbl(sb: Client, nome: str):
-    """Sempre usa schema almoxarifado explicitamente (não depende de ClientOptions)."""
-    return sb.schema(SCHEMA).table(nome)
+    """Sempre usa schema almoxarifado explicitamente."""
+    return sb.schema(SCHEMA).from_(nome)
 
 
 def tbl_view(sb: Client, nome: str):
     return sb.schema(SCHEMA).from_(nome)
+
+
+def testar_conexao_rest(url: str, key: str) -> tuple[bool, str]:
+    """Teste direto via REST (Accept-Profile) — mais confiável que supabase-py."""
+    import json
+    from urllib.error import HTTPError
+    from urllib.request import Request, urlopen
+
+    req_url = f"{url.rstrip('/')}/rest/v1/destinos?select=id&limit=1"
+    req = Request(
+        req_url,
+        headers={
+            "apikey": key,
+            "Authorization": f"Bearer {key}",
+            "Accept-Profile": SCHEMA,
+        },
+    )
+    try:
+        with urlopen(req, timeout=12) as resp:
+            json.loads(resp.read().decode())
+        return True, ""
+    except HTTPError as e:
+        body = e.read().decode(errors="replace")[:300]
+        return False, f"HTTP {e.code}: {body}"
+    except Exception as e:
+        return False, str(e)
+
+
+def testar_conexao(url: str, key: str) -> tuple[bool, str]:
+    ok, msg = testar_conexao_rest(url, key)
+    if ok:
+        return True, ""
+    try:
+        sb = criar_sb(url, key)
+        tbl(sb, "destinos").select("id").limit(1).execute()
+        return True, ""
+    except Exception as e:
+        return False, msg or str(e)
 
 
 def executar_consulta(fn, padrao=None):
@@ -201,22 +239,15 @@ def executar_consulta(fn, padrao=None):
         msg = str(e)
         if "PGRST106" in msg:
             st.session_state["sb_erro"] = (
-                "PostgREST ainda não recarregou o schema **almoxarifado**. "
-                "Supabase → SQL Editor → rode `sql/002_reload_postgrest_schema.sql` → depois clique **Atualizar**."
+                "PostgREST não reconhece o schema almoxarifado. "
+                "Rode o SQL de reload no Supabase e clique **Atualizar**."
             )
-        elif "schema" in msg.lower() and "42501" in msg:
-            st.session_state["sb_erro"] = (
-                "Sem permissão no schema almoxarifado. "
-                "Rode `sql/002_reload_postgrest_schema.sql` no SQL Editor."
-            )
-        elif "schema" in msg.lower():
-            st.session_state["sb_erro"] = (
-                f"Acesso ao schema almoxarifado falhou: {msg[:180]}"
-            )
-        elif "Invalid API key" in msg or "401" in msg:
+        elif "42501" in msg:
+            st.session_state["sb_erro"] = "Sem permissão no schema almoxarifado. Rode sql/002_reload_postgrest_schema.sql."
+        elif "Invalid API key" in msg or "401" in msg or "JWT" in msg:
             st.session_state["sb_erro"] = "SUPABASE_KEY inválida nos Secrets do Streamlit Cloud."
         else:
-            st.session_state["sb_erro"] = f"Erro ao consultar banco: {msg[:200]}"
+            st.session_state["sb_erro"] = f"Erro ao consultar banco: {msg[:220]}"
         return padrao if padrao is not None else []
 
 
@@ -478,11 +509,22 @@ APP_PIN = "seu-pin-opcional"
 
 sb: Client = criar_sb(url_sb, key_sb)
 
-# Teste rápido de conexão (não derruba o app)
-_teste = executar_consulta(lambda: tbl(sb, "destinos").select("id").limit(1).execute().data)
+# Teste de conexão a cada carregamento (limpa erro antigo da sessão)
+st.session_state.pop("sb_erro", None)
+_con_ok, _con_msg = testar_conexao(url_sb, key_sb)
+if _con_ok:
+    st.session_state["sb_ok"] = True
+else:
+    st.session_state["sb_erro"] = _con_msg or "Falha ao conectar no schema almoxarifado."
+
 if st.session_state.get("sb_erro"):
     st.error(st.session_state["sb_erro"])
-    st.info("Corrija e clique **Atualizar**. O app continua aberto para consulta.")
+    with st.expander("Diagnóstico"):
+        st.caption(f"URL: {'OK' if url_sb else 'VAZIA'} · Key: {len(key_sb)} caracteres")
+        st.caption("Anon key costuma ter ~200 caracteres. Confira Streamlit Cloud → Secrets.")
+    st.info("Corrija e clique **Atualizar** (ou Reboot app no Streamlit Cloud).")
+elif st.session_state.pop("sb_ok", False):
+    pass  # conexão OK — sem banner
 
 # ── Header ───────────────────────────────────────────────────────────────────
 c_logo, c_tit, c_btn = st.columns([1.1, 4.9, 1])
@@ -495,6 +537,8 @@ with c_tit:
 with c_btn:
     if st.button("🔄 Atualizar"):
         st.cache_data.clear()
+        st.session_state.pop("sb_erro", None)
+        st.session_state.pop("sb_ok", None)
         st.rerun()
 
 # Hub cards — setores críticos
