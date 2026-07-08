@@ -1,0 +1,137 @@
+SIGALMOX — Controle de Estoque · Santa Virgínia
+================================================
+
+Sistema de baixa de estoque por retirada física (scan QR), conciliação com SAP.
+NÃO substitui o SAP — registra o que saiu fisicamente para você baixar no SAP no mesmo dia.
+
+ESTRUTURA
+---------
+SIGALMOX/
+├── sql/001_almoxarifado_schema.sql   ← Rodar no Supabase SQL Editor
+├── sigalmox_app.py                   ← Painel Streamlit (mesa de trabalho)
+├── sigcf_auth.py                     ← PIN opcional
+├── carregar_produtos_sap.py          ← Import CLI (Excel SAP → banco)
+├── gerar_qr_etiquetas.py             ← Gera PDF de etiquetas QR
+├── pwa-sigalmox/                     ← PWA celular (scan na prateleira)
+│   ├── index.html
+│   ├── app.js
+│   └── config.js                     ← Colocar SUPABASE_ANON_KEY aqui
+├── .streamlit/secrets.toml           ← Credenciais Streamlit Cloud
+└── requirements.txt
+
+PASSO 1 — BANCO DE DADOS (Supabase)
+------------------------------------
+1. Abra o SQL Editor do projeto azhpxhrwhegfysoeqmft
+2. Cole e execute: sql/001_almoxarifado_schema.sql
+3. Vá em Settings → API → Exposed schemas → adicione "almoxarifado"
+4. Confirme que as tabelas aparecem no Table Editor
+
+PASSO 2 — STREAMLIT (mesa de trabalho)
+---------------------------------------
+1. Copie .streamlit/secrets.toml.example → secrets.toml
+2. Preencha SUPABASE_URL e SUPABASE_KEY (anon)
+3. pip install -r requirements.txt
+4. streamlit run sigalmox_app.py
+
+Abas do painel:
+  📊 Estoques Críticos  — consulta saldo por setor (Medicamentos, Nutrição, etc.)
+  📥 Entrada (NF)       — lança recebimento de mercadoria
+  ✅ Pendências SAP     — retiradas físicas aguardando baixa no SAP
+  🔄 Conciliação        — upload Excel SAP × retiradas SIGALMOX
+  📋 Importar SAP / QR  — cadastra produtos + gera PDF etiquetas
+  ⚙️ Cadastros          — destinos, responsáveis, estoque mínimo
+
+PASSO 3 — PWA (celular na prateleira)
+--------------------------------------
+1. Edite pwa-sigalmox/config.js → SUPABASE_ANON_KEY
+2. Sirva localmente ou publique (GitHub Pages / servidor estático)
+3. Abra no celular → escaneie QR da prateleira → preencha → confirma
+
+Fluxo de saída:
+  Prateleira → scan QR (SIGALMOX-{codigo_sap})
+  → produto identificado automaticamente
+  → Quantidade + Destino + Quem retirou
+  → Confirma → baixa automática no SIGALMOX (trigger subtrai estoque)
+  → Baixa manual no SAP (mesmo dia)
+  → Streamlit → Pendências SAP → ✅ Baixado no SAP
+
+PASSO 4 — IMPORTAR LISTA SAP
+-----------------------------
+Quando chegar mercadoria ou exportar estoque do SAP:
+
+  Opção A — Streamlit: aba "Importar SAP / QR" → upload Excel → Importar
+  Opção B — CLI:
+    python carregar_produtos_sap.py "C:\caminho\lista.xlsx" --categoria "Medicamentos Pecuária" --gerar-pdf
+
+Colunas aceitas no Excel (aliases):
+  codigo / material / item / sap
+  descricao / produto / texto breve material
+  em_estoque / estoque / saldo / livre utilização
+
+Produtos novos são cadastrados automaticamente.
+QR gerado no formato: SIGALMOX-{codigo_sap}
+
+SETOR / CATEGORIAS
+------------------
+Internos (almoxarifado):
+  Medicamentos Pecuária, Vacinas e Inseminação, Filtros,
+  Defensivos Agrícola, Carvão Vegetal, Gás de Cozinha,
+  Consumíveis Manutenção, Consumíveis Borracharia
+
+Externos (controle almoxarifado):
+  Lubrificantes, Adubos e Fertilizantes, Combustíveis,
+  Nutrição Animal, EPIs, Viveiro Floresta
+
+Críticos (monitorados com estoque mínimo):
+  Medicamentos Pecuária, Nutrição Animal, Lubrificantes,
+  Combustíveis, Defensivos Agrícola, Filtros
+
+CONCILIAÇÃO
+-----------
+1. Exporte estoque do SAP (Excel)
+2. Streamlit → Conciliação → upload
+3. Sistema classifica:
+   OK                  — estoques batem
+   BAIXA_PENDENTE_SAP  — retirou fisicamente, ainda não baixou no SAP
+   DIVERGENCIA_LEVE    — diferença ≤ 1 unidade
+   DIVERGENCIA_REAL    — investigar e justificar
+
+TABELAS (schema almoxarifado)
+-------------------------------
+  produtos              — cadastro central (codigo_sap, qr_code, estoque_atual)
+  destinos              — setores/locais de destino
+  responsaveis          — quem retira
+  movimentacoes         — SAÍDAS (scan QR) → trigger baixa estoque
+  entradas              — ENTRADAS (NF) → trigger soma estoque
+  sap_importacao        — log de cada importação SAP
+  sap_estoque_importado — snapshot SAP por importação
+  v_conciliacao         — view cruzamento SIGALMOX × SAP
+  v_estoques_criticos   — view alertas estoque mínimo
+  v_pendencias_sap      — view retiradas sem baixa SAP
+
+DEPLOY STREAMLIT CLOUD
+----------------------
+Repo: lubrificacaomaquinassv-cloud/sigalmox
+Main file: sigalmox_app.py
+
+1. Acesse https://share.streamlit.io → "Create app"
+2. Repository: lubrificacaomaquinassv-cloud/sigalmox
+3. Branch: main
+4. Main file path: sigalmox_app.py
+5. Advanced settings → Secrets (cole exatamente):
+
+SUPABASE_URL = "https://azhpxhrwhegfysoeqmft.supabase.co"
+SUPABASE_KEY = "sua-anon-key"
+APP_PIN = "SV2026!x"
+
+6. Deploy → aguarde ~2 min → URL tipo:
+   https://sigalmox.streamlit.app
+   (ou nome que escolher no painel)
+
+DEPLOY PWA (celular — scan QR)
+------------------------------
+Opção A — GitHub Pages (painel-frota-sv):
+  Execute PUBLICAR_PWA.bat → confirme commit+push
+  URL: https://lubrificacaomaquinassv-cloud.github.io/painel-frota-sv/almox/
+
+Opção B — Repo separado pwa-sigalmox (futuro)
