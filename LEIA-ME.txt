@@ -78,9 +78,9 @@ Internos (almoxarifado):
   Defensivos Agrícola, Carvão Vegetal, Gás de Cozinha,
   Consumíveis Manutenção, Consumíveis Borracharia
 
-Externos (controle almoxarifado):
+  Externos (controle almoxarifado):
   Lubrificantes, Adubos e Fertilizantes, Combustíveis,
-  Nutrição Animal, EPIs, Viveiro Floresta
+  Nutrição Animal, EPIs, Viveiro Floresta, SESTR
 
 Críticos (monitorados com estoque mínimo):
   Medicamentos Pecuária, Nutrição Animal, Lubrificantes,

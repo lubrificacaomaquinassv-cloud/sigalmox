@@ -263,7 +263,8 @@ INSERT INTO almoxarifado.destinos (nome, setor) VALUES
   ('Agricultura — Pulverização', 'Agricultura'),
   ('Agricultura — Plantio', 'Agricultura'),
   ('Refeitório', 'Administração'),
-  ('Administração', 'Administração')
+  ('Administração', 'Administração'),
+  ('SESTR', 'SESTR')
 ON CONFLICT (nome) DO NOTHING;
 
 INSERT INTO almoxarifado.responsaveis (nome) VALUES

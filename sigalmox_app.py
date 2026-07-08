@@ -24,7 +24,7 @@ CATEGORIAS_INTERNAS = [
 ]
 CATEGORIAS_EXTERNAS = [
     "Lubrificantes", "Adubos e Fertilizantes", "Combustíveis",
-    "Nutrição Animal", "EPIs", "Viveiro Floresta",
+    "Nutrição Animal", "EPIs", "Viveiro Floresta", "SESTR",
 ]
 CATEGORIAS_CRITICAS = [
     "Medicamentos Pecuária", "Nutrição Animal", "Lubrificantes",

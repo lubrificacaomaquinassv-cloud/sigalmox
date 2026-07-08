@@ -79,7 +79,7 @@ PASSO 8 — Repetir para próximo setor
     6. Vacinas e Inseminação
     7. Carvão / Gás
   Externos (quando tiver export SAP):
-    - Lubrificantes, Combustíveis, Nutrição Animal, etc.
+    - Lubrificantes, Combustíveis, Nutrição Animal, SESTR, etc.
 
 
 ═══════════════════════════════════════════════════════════════
