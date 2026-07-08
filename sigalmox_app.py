@@ -7,11 +7,6 @@ from pathlib import Path
 from supabase import create_client, Client
 from sigcf_auth import exigir_acesso, logo_html
 
-try:
-    from supabase.lib.client_options import SyncClientOptions as ClientOptions
-except ImportError:
-    ClientOptions = None  # type: ignore
-
 st.set_page_config(
     page_title="SIGALMOX — SANTA VERGÍNIA",
     page_icon="📦",
@@ -186,16 +181,16 @@ def ler_credenciais_supabase() -> tuple[str, str]:
 
 
 def criar_sb(url: str, key: str) -> Client:
-    if ClientOptions is not None:
-        return create_client(url, key, options=ClientOptions(schema=SCHEMA))
     return create_client(url, key)
 
 
 def tbl(sb: Client, nome: str):
-    try:
-        return sb.table(nome)
-    except Exception:
-        return sb.schema(SCHEMA).table(nome)
+    """Sempre usa schema almoxarifado explicitamente (não depende de ClientOptions)."""
+    return sb.schema(SCHEMA).table(nome)
+
+
+def tbl_view(sb: Client, nome: str):
+    return sb.schema(SCHEMA).from_(nome)
 
 
 def executar_consulta(fn, padrao=None):
@@ -204,10 +199,19 @@ def executar_consulta(fn, padrao=None):
         return fn()
     except Exception as e:
         msg = str(e)
-        if "PGRST106" in msg or "schema" in msg.lower():
+        if "PGRST106" in msg:
             st.session_state["sb_erro"] = (
-                "Schema **almoxarifado** inacessível. "
-                "Supabase → Project Settings → API → Exposed schemas → marque **almoxarifado** → Save."
+                "PostgREST ainda não recarregou o schema **almoxarifado**. "
+                "Supabase → SQL Editor → rode `sql/002_reload_postgrest_schema.sql` → depois clique **Atualizar**."
+            )
+        elif "schema" in msg.lower() and "42501" in msg:
+            st.session_state["sb_erro"] = (
+                "Sem permissão no schema almoxarifado. "
+                "Rode `sql/002_reload_postgrest_schema.sql` no SQL Editor."
+            )
+        elif "schema" in msg.lower():
+            st.session_state["sb_erro"] = (
+                f"Acesso ao schema almoxarifado falhou: {msg[:180]}"
             )
         elif "Invalid API key" in msg or "401" in msg:
             st.session_state["sb_erro"] = "SUPABASE_KEY inválida nos Secrets do Streamlit Cloud."
@@ -330,7 +334,7 @@ def carregar_estoques_criticos(_sb_url: str, _sb_key: str) -> list:
 
     def _load():
         try:
-            return tbl(sb, "v_estoques_criticos").select("*").execute().data or []
+            return tbl_view(sb, "v_estoques_criticos").select("*").execute().data or []
         except Exception:
             produtos = carregar_produtos(_sb_url, _sb_key)
             return [p for p in produtos if p.get("categoria") in CATEGORIAS_CRITICAS]
