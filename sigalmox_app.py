@@ -7,6 +7,11 @@ from pathlib import Path
 from supabase import create_client, Client
 from sigcf_auth import exigir_acesso, logo_html
 
+try:
+    from supabase.lib.client_options import SyncClientOptions as ClientOptions
+except ImportError:
+    ClientOptions = None  # type: ignore
+
 st.set_page_config(
     page_title="SIGALMOX — SANTA VERGÍNIA",
     page_icon="📦",
@@ -180,8 +185,35 @@ def ler_credenciais_supabase() -> tuple[str, str]:
     return str(url or "").strip(), str(key or "").strip()
 
 
+def criar_sb(url: str, key: str) -> Client:
+    if ClientOptions is not None:
+        return create_client(url, key, options=ClientOptions(schema=SCHEMA))
+    return create_client(url, key)
+
+
 def tbl(sb: Client, nome: str):
-    return sb.schema(SCHEMA).table(nome)
+    try:
+        return sb.table(nome)
+    except Exception:
+        return sb.schema(SCHEMA).table(nome)
+
+
+def executar_consulta(fn, padrao=None):
+    """Executa consulta Supabase sem derrubar o app."""
+    try:
+        return fn()
+    except Exception as e:
+        msg = str(e)
+        if "PGRST106" in msg or "schema" in msg.lower():
+            st.session_state["sb_erro"] = (
+                "Schema **almoxarifado** inacessível. "
+                "Supabase → Project Settings → API → Exposed schemas → marque **almoxarifado** → Save."
+            )
+        elif "Invalid API key" in msg or "401" in msg:
+            st.session_state["sb_erro"] = "SUPABASE_KEY inválida nos Secrets do Streamlit Cloud."
+        else:
+            st.session_state["sb_erro"] = f"Erro ao consultar banco: {msg[:200]}"
+        return padrao if padrao is not None else []
 
 
 def normalizar_coluna(nome: str) -> str:
@@ -217,97 +249,117 @@ def ler_excel_sap(uploaded) -> pd.DataFrame:
     return out
 
 
+def _enriquecer_movimentacoes(sb: Client, rows: list) -> list:
+    if not rows:
+        return rows
+    prod_ids = list({r["produto_id"] for r in rows if r.get("produto_id")})
+    if not prod_ids:
+        return rows
+    prods = (
+        tbl(sb, "produtos").select("id, codigo_sap, descricao, categoria")
+        .in_("id", prod_ids).execute().data or []
+    )
+    pmap = {p["id"]: p for p in prods}
+    for r in rows:
+        r["produtos"] = pmap.get(r.get("produto_id"), {})
+    return rows
+
+
 @st.cache_data(ttl=30)
 def carregar_produtos(_sb_url: str, _sb_key: str, categoria: str | None = None) -> list:
-    sb = create_client(_sb_url, _sb_key)
+    sb = criar_sb(_sb_url, _sb_key)
     q = tbl(sb, "produtos").select("*").eq("ativo", True).order("descricao")
     if categoria:
         q = q.eq("categoria", categoria)
-    return q.execute().data or []
+    return executar_consulta(lambda: q.execute().data or [])
 
 
 @st.cache_data(ttl=30)
 def carregar_destinos(_sb_url: str, _sb_key: str) -> list:
-    sb = create_client(_sb_url, _sb_key)
-    return (
-        tbl(sb, "destinos").select("*").eq("ativo", True).order("nome").execute().data or []
+    sb = criar_sb(_sb_url, _sb_key)
+    return executar_consulta(
+        lambda: tbl(sb, "destinos").select("*").eq("ativo", True).order("nome").execute().data or []
     )
 
 
 @st.cache_data(ttl=30)
 def carregar_responsaveis(_sb_url: str, _sb_key: str) -> list:
-    sb = create_client(_sb_url, _sb_key)
-    return (
-        tbl(sb, "responsaveis").select("*").eq("ativo", True).order("nome").execute().data or []
+    sb = criar_sb(_sb_url, _sb_key)
+    return executar_consulta(
+        lambda: tbl(sb, "responsaveis").select("*").eq("ativo", True).order("nome").execute().data or []
     )
 
 
 @st.cache_data(ttl=15)
 def carregar_pendencias(_sb_url: str, _sb_key: str) -> list:
-    sb = create_client(_sb_url, _sb_key)
-    return (
-        tbl(sb, "movimentacoes")
-        .select("*, produtos(codigo_sap, descricao, categoria)")
-        .eq("baixado_sap", False)
-        .order("data_retirada", desc=True)
-        .execute()
-        .data or []
-    )
+    sb = criar_sb(_sb_url, _sb_key)
+
+    def _load():
+        rows = (
+            tbl(sb, "movimentacoes").select("*")
+            .eq("baixado_sap", False)
+            .order("data_retirada", desc=True)
+            .execute().data or []
+        )
+        return _enriquecer_movimentacoes(sb, rows)
+
+    return executar_consulta(_load)
 
 
 @st.cache_data(ttl=15)
 def carregar_movimentacoes_dia(_sb_url: str, _sb_key: str, dia: str) -> list:
-    sb = create_client(_sb_url, _sb_key)
+    sb = criar_sb(_sb_url, _sb_key)
     ini = f"{dia}T00:00:00"
     fim = f"{dia}T23:59:59"
-    return (
-        tbl(sb, "movimentacoes")
-        .select("*, produtos(codigo_sap, descricao, categoria)")
-        .gte("data_retirada", ini)
-        .lte("data_retirada", fim)
-        .order("data_retirada", desc=True)
-        .execute()
-        .data or []
-    )
+
+    def _load():
+        rows = (
+            tbl(sb, "movimentacoes").select("*")
+            .gte("data_retirada", ini).lte("data_retirada", fim)
+            .order("data_retirada", desc=True)
+            .execute().data or []
+        )
+        return _enriquecer_movimentacoes(sb, rows)
+
+    return executar_consulta(_load)
 
 
 @st.cache_data(ttl=30)
 def carregar_estoques_criticos(_sb_url: str, _sb_key: str) -> list:
-    sb = create_client(_sb_url, _sb_key)
-    try:
-        return sb.schema(SCHEMA).from_("v_estoques_criticos").select("*").execute().data or []
-    except Exception:
-        produtos = carregar_produtos(_sb_url, _sb_key)
-        return [
-            p for p in produtos
-            if p.get("categoria") in CATEGORIAS_CRITICAS
-        ]
+    sb = criar_sb(_sb_url, _sb_key)
+
+    def _load():
+        try:
+            return tbl(sb, "v_estoques_criticos").select("*").execute().data or []
+        except Exception:
+            produtos = carregar_produtos(_sb_url, _sb_key)
+            return [p for p in produtos if p.get("categoria") in CATEGORIAS_CRITICAS]
+
+    return executar_consulta(_load)
 
 
 @st.cache_data(ttl=30)
 def carregar_ultima_importacao(_sb_url: str, _sb_key: str, categoria: str) -> dict | None:
-    sb = create_client(_sb_url, _sb_key)
-    rows = (
-        tbl(sb, "sap_importacao")
-        .select("*")
-        .eq("categoria", categoria)
-        .order("importado_em", desc=True)
-        .limit(1)
-        .execute()
-        .data or []
-    )
-    return rows[0] if rows else None
+    sb = criar_sb(_sb_url, _sb_key)
+
+    def _load():
+        rows = (
+            tbl(sb, "sap_importacao").select("*")
+            .eq("categoria", categoria)
+            .order("importado_em", desc=True)
+            .limit(1).execute().data or []
+        )
+        return rows[0] if rows else None
+
+    return executar_consulta(_load, padrao=None)
 
 
 @st.cache_data(ttl=30)
 def carregar_sap_importado(_sb_url: str, _sb_key: str, importacao_id: str) -> list:
-    sb = create_client(_sb_url, _sb_key)
-    return (
-        tbl(sb, "sap_estoque_importado")
-        .select("*")
-        .eq("importacao_id", importacao_id)
-        .execute()
-        .data or []
+    sb = criar_sb(_sb_url, _sb_key)
+    return executar_consulta(
+        lambda: tbl(sb, "sap_estoque_importado").select("*")
+        .eq("importacao_id", importacao_id).execute().data or []
     )
 
 
@@ -420,12 +472,18 @@ APP_PIN = "seu-pin-opcional"
     """)
     st.stop()
 
-sb: Client = create_client(url_sb, key_sb)
+sb: Client = criar_sb(url_sb, key_sb)
+
+# Teste rápido de conexão (não derruba o app)
+_teste = executar_consulta(lambda: tbl(sb, "destinos").select("id").limit(1).execute().data)
+if st.session_state.get("sb_erro"):
+    st.error(st.session_state["sb_erro"])
+    st.info("Corrija e clique **Atualizar**. O app continua aberto para consulta.")
 
 # ── Header ───────────────────────────────────────────────────────────────────
 c_logo, c_tit, c_btn = st.columns([1.1, 4.9, 1])
 with c_logo:
-    st.markdown(logo_html(), unsafe_allow_html=True)
+    st.markdown(logo_html(120), unsafe_allow_html=True)
 with c_tit:
     st.title("SIGALMOX")
     st.caption("Controle de estoque — retirada física + conciliação SAP · Santa Virgínia")

@@ -1,0 +1,153 @@
+SIGALMOX — GUIA DE INÍCIO NO ALMOXARIFADO
+==========================================
+Use este roteiro no dia em que estiver fisicamente no setor.
+
+PRÉ-REQUISITOS (já feitos antes de ir ao almox)
+------------------------------------------------
+[ ] Schema almoxarifado criado no Supabase
+[ ] Exposed schemas: public + almoxarifado (Save)
+[ ] Streamlit Cloud no ar (sigalmox_app.py)
+[ ] PWA no celular: painel-frota-sv/almox/
+[ ] PIN de acesso anotado
+
+FERRAMENTAS NO DIA
+------------------
+- Notebook ou PC com SAP aberto
+- Celular com PWA SIGALMOX (scan QR)
+- Impressora (etiquetas QR)
+- Excel exportado do SAP por setor
+
+
+═══════════════════════════════════════════════════════════════
+ DIA 1 — PRIMEIRA CARGA (setor por setor, não tudo de uma vez)
+═══════════════════════════════════════════════════════════════
+
+PASSO 1 — Exportar do SAP (manhã, antes de mexer no estoque)
+  1. Abra o SAP
+  2. Exporte a lista de estoque do PRIMEIRO setor (ex: Medicamentos Pecuária)
+  3. Salve como Excel (.xlsx) no Desktop
+  4. Confirme que o Excel tem: código, descrição, quantidade em estoque
+
+PASSO 2 — Importar no Streamlit
+  1. Abra o painel SIGALMOX (Streamlit Cloud)
+  2. Aba: **Importar SAP / QR**
+  3. Selecione a categoria correta (ex: Medicamentos Pecuária)
+  4. Faça upload do Excel
+  5. Confira a prévia (quantidade de itens)
+  6. Clique: **Importar para SIGALMOX**
+  7. Mensagem esperada: "X novos, Y existentes"
+
+PASSO 3 — Gerar e imprimir etiquetas QR
+  1. Na mesma aba, clique: **Gerar PDF de etiquetas**
+  2. Baixe o PDF
+  3. Imprima
+  4. Cole uma etiqueta em cada prateleira / pasta do setor
+  5. Formato do QR: SIGALMOX-{codigo_sap}
+
+PASSO 4 — Conferir cadastro
+  1. Aba: **Estoques Críticos**
+  2. Selecione o setor importado
+  3. Clique: **Consultar saldo**
+  4. Verifique se os produtos aparecem com saldo correto
+
+PASSO 5 — Configurar destinos e responsáveis (uma vez só)
+  1. Aba: **Cadastros**
+  2. Destinos: adicione locais reais (ex: "Pecuária — Curral 3")
+  3. Responsáveis: adicione nomes de quem retira
+  4. Estoque mínimo: defina alertas nos produtos críticos
+
+PASSO 6 — Testar retirada física (PWA celular)
+  1. Abra no celular: painel-frota-sv/almox/
+  2. Escaneie QR de um produto de teste
+  3. Preencha: quantidade, destino, quem retirou
+  4. Confirme
+  5. Volte ao Streamlit → aba **Estoques Críticos** → saldo deve ter baixado
+  6. Aba **Pendências SAP** → retirada deve aparecer como pendente
+
+PASSO 7 — Baixa no SAP (mesmo dia)
+  1. Faça a baixa manual no SAP (como já faz hoje)
+  2. Streamlit → **Pendências SAP**
+  3. Selecione a retirada → **Confirmar baixa no SAP**
+
+PASSO 8 — Repetir para próximo setor
+  Ordem sugerida:
+    1. Medicamentos Pecuária
+    2. Filtros
+    3. Defensivos Agrícola
+    4. Consumíveis Manutenção
+    5. Consumíveis Borracharia
+    6. Vacinas e Inseminação
+    7. Carvão / Gás
+  Externos (quando tiver export SAP):
+    - Lubrificantes, Combustíveis, Nutrição Animal, etc.
+
+
+═══════════════════════════════════════════════════════════════
+ ROTINA DIÁRIA (após implantação)
+═══════════════════════════════════════════════════════════════
+
+MANHÃ
+  - Chegou NF? → Streamlit → Entrada (NF) → lançar recebimento
+  - Lançar entrada no SAP também
+
+DURANTE O DIA (cada retirada física)
+  - Pegou produto na prateleira → scan QR no celular (PWA)
+  - Preenche quantidade + destino + quem retirou → confirma
+
+FINAL DO DIA
+  - Streamlit → Pendências SAP → baixar todas no SAP → marcar ✅
+  - (Opcional) Conciliação: upload Excel SAP → verificar divergências
+
+
+═══════════════════════════════════════════════════════════════
+ ENTRADA DE MERCADORIA (NF)
+═══════════════════════════════════════════════════════════════
+
+  1. NF chega no almox
+  2. Streamlit → Entrada (NF)
+  3. Selecione produto, quantidade, NF, fornecedor
+  4. Registrar entrada → estoque SIGALMOX sobe automaticamente
+  5. Lançar entrada no SAP (manual)
+  6. NF segue para financeiro
+
+
+═══════════════════════════════════════════════════════════════
+ CONCILIAÇÃO (semanal ou quando quiser auditar)
+═══════════════════════════════════════════════════════════════
+
+  1. Exporte estoque atual do SAP (Excel)
+  2. Streamlit → Conciliação
+  3. Selecione categoria + upload Excel
+  4. Gerar conciliação
+  5. Status:
+     OK                  → tudo certo
+     BAIXA_PENDENTE_SAP  → retirou fisicamente, falta baixar no SAP
+     DIVERGENCIA_REAL    → investigar
+
+
+═══════════════════════════════════════════════════════════════
+ LINKS ÚTEIS
+═══════════════════════════════════════════════════════════════
+
+  Painel (Streamlit):  seu app no share.streamlit.io
+  PWA (celular):       https://lubrificacaomaquinassv-cloud.github.io/painel-frota-sv/almox/
+  Código (GitHub):     https://github.com/lubrificacaomaquinassv-cloud/sigalmox
+  Supabase:            projeto azhpxhrwhegfysoeqmft
+
+
+═══════════════════════════════════════════════════════════════
+ PROBLEMAS COMUNS
+═══════════════════════════════════════════════════════════════
+
+  Erro vermelho no Streamlit?
+    → Supabase → API → Exposed schemas → almoxarifado marcado → Save
+    → Streamlit Secrets: SUPABASE_URL e SUPABASE_KEY corretos
+    → Clique Atualizar no painel
+
+  PWA não encontra produto?
+    → Produto ainda não importado do SAP
+    → Importe na aba Importar SAP / QR primeiro
+
+  Saldo não baixou?
+    → Verifique conexão (PWA mostra Online?)
+    → Pendências na fila offline sincronizam ao voltar rede
