@@ -228,7 +228,7 @@ FROM almoxarifado.produtos p
 WHERE p.ativo = TRUE
   AND p.categoria IN (
     'Medicamentos Pecuária', 'Nutrição Animal', 'Lubrificantes',
-    'Combustíveis', 'Defensivos Agrícola', 'Filtros'
+    'Combustíveis', 'Defensivos Agrícola', 'Filtros', 'SESTR'
   );
 
 -- ── View: pendências SAP (retiradas do dia) ─────────────────────────────────

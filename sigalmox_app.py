@@ -28,7 +28,7 @@ CATEGORIAS_EXTERNAS = [
 ]
 CATEGORIAS_CRITICAS = [
     "Medicamentos Pecuária", "Nutrição Animal", "Lubrificantes",
-    "Combustíveis", "Defensivos Agrícola", "Filtros",
+    "Combustíveis", "Defensivos Agrícola", "Filtros", "SESTR",
 ]
 TODAS_CATEGORIAS = CATEGORIAS_INTERNAS + CATEGORIAS_EXTERNAS
 
@@ -541,19 +541,24 @@ with c_btn:
         st.session_state.pop("sb_ok", None)
         st.rerun()
 
-# Hub cards — setores críticos
+# Hub cards — setores monitorados
 st.markdown('<div class="sec">Setores monitorados</div>', unsafe_allow_html=True)
-cols = st.columns(6)
+cols = st.columns(7)
 hub_items = [
-    ("💊", "Medicamentos"), ("🌾", "Nutrição"), ("🛢️", "Lubrificantes"),
-    ("⛽", "Combustíveis"), ("🧪", "Defensivos"), ("🔧", "Filtros"),
+    ("💊", "Medicamentos", "MONITORADO"),
+    ("🌾", "Nutrição", "MONITORADO"),
+    ("🛢️", "Lubrificantes", "MONITORADO"),
+    ("⛽", "Combustíveis", "MONITORADO"),
+    ("🧪", "Defensivos", "MONITORADO"),
+    ("🔧", "Filtros", "MONITORADO"),
+    ("🏗️", "SESTR", "EXTERNO"),
 ]
-for col, (ico, nome) in zip(cols, hub_items):
+for col, (ico, nome, tag) in zip(cols, hub_items):
     with col:
         st.markdown(
             f'<div class="hub-card active"><div class="ico">{ico}</div>'
             f'<div class="tit">{nome}</div>'
-            f'<span class="tag">MONITORADO</span></div>',
+            f'<span class="tag">{tag}</span></div>',
             unsafe_allow_html=True,
         )
 
@@ -570,7 +575,7 @@ tab_estoque, tab_entrada, tab_pend, tab_conc, tab_import, tab_cad = st.tabs([
 # ══ TAB: Estoques Críticos ═══════════════════════════════════════════════════
 with tab_estoque:
     st.markdown('<div class="sec">Consulta de estoque por setor</div>', unsafe_allow_html=True)
-    cat_sel = st.selectbox("Setor / categoria", ["Todos"] + CATEGORIAS_CRITICAS, key="cat_estoque")
+    cat_sel = st.selectbox("Setor / categoria", ["Todos"] + TODAS_CATEGORIAS, key="cat_estoque")
     if st.button("🔍 Consultar saldo", key="btn_consulta"):
         st.session_state["consulta_feita"] = True
 
