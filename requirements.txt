@@ -1,7 +1,9 @@
-streamlit>=1.35.0
-supabase>=2.0.0
-pandas>=2.0.0
+# SIGALMOX — Streamlit Cloud (painel web)
+# IMPORTANTE: no deploy, selecione Python 3.12 (não 3.14)
+streamlit>=1.35.0,<1.60
+supabase>=2.0.0,<3
+pandas>=2.0.0,<3.0
 openpyxl>=3.1.0
-qrcode[pil]>=7.4.0
-reportlab>=4.0.0
-psycopg2-binary>=2.9.0
+qrcode>=7.4
+reportlab>=4.0
+Pillow>=10.0,<12

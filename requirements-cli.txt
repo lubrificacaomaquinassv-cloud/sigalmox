@@ -1,0 +1,3 @@
+# Scripts locais (aplicar_schema, carregar_produtos_sap) — não usar no Streamlit Cloud
+-r requirements.txt
+psycopg2-binary>=2.9.0

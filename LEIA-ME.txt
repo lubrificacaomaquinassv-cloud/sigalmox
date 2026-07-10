@@ -124,6 +124,8 @@ SUPABASE_URL = "https://azhpxhrwhegfysoeqmft.supabase.co"
 SUPABASE_KEY = "sua-anon-key"
 APP_PIN = "SV2026!x"
 
+   **Python version: 3.12** (NÃO usar 3.14 — causa Segmentation fault)
+
 6. Deploy → aguarde ~2 min → URL tipo:
    https://sigalmox.streamlit.app
    (ou nome que escolher no painel)

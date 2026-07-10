@@ -1,0 +1,43 @@
+SIGALMOX — Deploy Streamlit Cloud
+=================================
+
+ERRO "Segmentation fault" / "Ah não"
+------------------------------------
+Causa comum: Python 3.14 + pandas 3.x no Streamlit Cloud.
+
+SOLUÇÃO (faça nesta ordem):
+
+1) ATUALIZAR CÓDIGO
+   O requirements.txt já está ajustado (sem psycopg2, pandas < 3).
+   Push no GitHub → aguarde redeploy.
+
+2) MUDAR VERSÃO DO PYTHON (obrigatório)
+   Streamlit Cloud → seu app SIGALMOX → ⚙️ Settings (Gerenciar aplicativo)
+   → Advanced settings → Python version → escolha **3.12**
+   → Save → Reboot app
+
+   Se não houver opção de mudar Python:
+   - Anote: URL, Secrets, repositório, main file (sigalmox_app.py)
+   - Delete o app
+   - Create app de novo → Advanced → Python **3.12** → cole Secrets → Deploy
+
+3) SECRETS (Settings → Secrets)
+   SUPABASE_URL = "https://azhpxhrwhegfysoeqmft.supabase.co"
+   SUPABASE_KEY = "sua-anon-key"
+   APP_PIN = "SV2026!x"
+
+4) MAIN FILE
+   sigalmox_app.py
+
+5) REBOOT
+   Manage app → Reboot app → aguarde 1-2 min
+
+SCRIPTS LOCAIS (PC, não na nuvem)
+---------------------------------
+  pip install -r requirements-cli.txt
+  python aplicar_schema.py
+  python carregar_produtos_sap.py lista.xlsx --categoria "SESTR"
+
+PWA CELULAR
+-----------
+  https://lubrificacaomaquinassv-cloud.github.io/painel-frota-sv/almox/
