@@ -359,6 +359,57 @@ def carregar_movimentacoes_dia(_sb_url: str, _sb_key: str, dia: str) -> list:
     return executar_consulta(_load)
 
 
+@st.cache_data(ttl=15)
+def carregar_movimentacoes_recentes(_sb_url: str, _sb_key: str, dias: int = 30) -> list:
+    sb = criar_sb(_sb_url, _sb_key)
+    desde = (datetime.now() - timedelta(days=dias)).isoformat()
+
+    def _load():
+        rows = (
+            tbl(sb, "movimentacoes").select("*")
+            .gte("data_retirada", desde)
+            .order("data_retirada", desc=True)
+            .limit(200)
+            .execute().data or []
+        )
+        return _enriquecer_movimentacoes(sb, rows)
+
+    return executar_consulta(_load)
+
+
+@st.cache_data(ttl=15)
+def carregar_ajustes_map(_sb_url: str, _sb_key: str) -> dict:
+    sb = criar_sb(_sb_url, _sb_key)
+
+    def _load():
+        try:
+            rows = tbl(sb, "ajustes").select("*").order("created_at", desc=True).execute().data or []
+        except Exception:
+            return None
+        out: dict = {}
+        for a in rows:
+            mid = a.get("movimentacao_id")
+            if not mid:
+                continue
+            if mid not in out:
+                out[mid] = {"estorno": 0.0, "extra": 0.0, "itens": []}
+            q = float(a.get("quantidade") or 0)
+            if a.get("tipo") == "estorno_excesso":
+                out[mid]["estorno"] += q
+            elif a.get("tipo") == "correcao_saida_extra":
+                out[mid]["extra"] += q
+            out[mid]["itens"].append(a)
+        return out
+
+    return executar_consulta(_load, padrao={})
+
+
+def quantidade_efetiva(mov: dict, ajustes_map: dict) -> float:
+    reg = float(mov.get("quantidade") or 0)
+    adj = ajustes_map.get(mov.get("id"), {}) if ajustes_map else {}
+    return reg - float(adj.get("estorno", 0)) + float(adj.get("extra", 0))
+
+
 @st.cache_data(ttl=30)
 def carregar_estoques_criticos(_sb_url: str, _sb_key: str) -> list:
     sb = criar_sb(_sb_url, _sb_key)
@@ -460,7 +511,8 @@ def calcular_conciliacao(
     for m in movimentacoes_pendentes:
         cod = (m.get("produtos") or {}).get("codigo_sap", "")
         if cod:
-            pend_map[cod] = pend_map.get(cod, 0) + float(m["quantidade"])
+            qtd = float(m.get("quantidade_efetiva", m.get("quantidade", 0)))
+            pend_map[cod] = pend_map.get(cod, 0) + qtd
 
     codigos = set(prod_map) | set(sap_map)
     rows = []
@@ -563,10 +615,11 @@ for col, (ico, nome, tag) in zip(cols, hub_items):
         )
 
 # ── Abas principais ──────────────────────────────────────────────────────────
-tab_estoque, tab_entrada, tab_pend, tab_conc, tab_import, tab_cad = st.tabs([
+tab_estoque, tab_entrada, tab_pend, tab_corr, tab_conc, tab_import, tab_cad = st.tabs([
     "📊 Estoques Críticos",
     "📥 Entrada (NF)",
     "✅ Pendências SAP",
+    "🔧 Correções",
     "🔄 Conciliação",
     "📋 Importar SAP / QR",
     "⚙️ Cadastros",
@@ -716,6 +769,132 @@ with tab_pend:
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
 
+# ══ TAB: Correções (saída lançada a mais / a menos) ═══════════════════════════
+with tab_corr:
+    st.markdown('<div class="sec">Corrigir saída com quantidade errada</div>', unsafe_allow_html=True)
+    st.caption(
+        "Ex.: registrou **10** no PWA, mas saiu **7** → informe **7** → o sistema **devolve 3** ao estoque. "
+        "Histórico mantido para auditoria."
+    )
+
+    ajustes_map = carregar_ajustes_map(url_sb, key_sb)
+    movs = carregar_movimentacoes_recentes(url_sb, key_sb, dias=45)
+
+    if ajustes_map is None:
+        st.warning(
+            "Tabela de ajustes ainda não criada. Rode no Supabase SQL Editor: "
+            "`sql/005_ajustes_correcao.sql` → depois clique **Atualizar**."
+        )
+    elif not movs:
+        st.info("Nenhuma retirada recente para corrigir.")
+    else:
+        opcoes_mov = {}
+        for m in movs:
+            prod = m.get("produtos") or {}
+            efet = quantidade_efetiva(m, ajustes_map)
+            label = (
+                f"{fmt_data(m['data_retirada'])} | SAP {prod.get('codigo_sap', '?')} | "
+                f"reg {fmt_num(m['quantidade'])} → efet {fmt_num(efet)} | {m.get('destino_nome', '')}"
+            )
+            opcoes_mov[label] = m
+
+        sel_label = st.selectbox("Selecione a retirada a corrigir", list(opcoes_mov.keys()))
+        mov = opcoes_mov[sel_label]
+        prod = mov.get("produtos") or {}
+        mid = mov["id"]
+        reg = float(mov["quantidade"])
+        adj = ajustes_map.get(mid, {})
+        ja_estornado = float(adj.get("estorno", 0))
+        efet_atual = reg - ja_estornado + float(adj.get("extra", 0))
+        max_devolver = reg - ja_estornado
+
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Registrado no PWA", fmt_num(reg))
+        c2.metric("Já estornado", fmt_num(ja_estornado))
+        c3.metric("Qtd. efetiva hoje", fmt_num(efet_atual))
+
+        if adj.get("itens"):
+            st.markdown("**Ajustes anteriores nesta retirada:**")
+            dark_table(pd.DataFrame([{
+                "Data": fmt_data(a.get("created_at")),
+                "Tipo": "Devolveu ao estoque" if a.get("tipo") == "estorno_excesso" else "Saída extra",
+                "Qtd": fmt_num(a.get("quantidade")),
+                "Motivo": a.get("motivo", ""),
+            } for a in adj["itens"]]), height=120)
+
+        st.markdown('<div class="sec">Nova correção</div>', unsafe_allow_html=True)
+        with st.form("form_correcao", clear_on_submit=False):
+            tipo_corr = st.radio(
+                "Tipo de erro",
+                ["Saí a MAIS no sistema (devolver ao estoque)", "Saí a MENOS no sistema (baixar mais)"],
+                horizontal=False,
+            )
+            qtd_correta = st.number_input(
+                "Quantidade REAL que saiu fisicamente",
+                min_value=0.0,
+                value=max(efet_atual, 0.0),
+                step=0.001,
+                format="%.3f",
+            )
+            motivo = st.text_area("Motivo (obrigatório)", placeholder="Ex.: erro de digitação no celular")
+            resp = st.text_input("Corrigido por", value="Almoxarife")
+            submitted = st.form_submit_button("✓ Aplicar correção")
+
+        if submitted:
+            if not motivo.strip():
+                st.error("Informe o motivo da correção.")
+            elif tipo_corr.startswith("Saí a MAIS"):
+                devolver = efet_atual - float(qtd_correta)
+                if devolver <= 0:
+                    st.error("Quantidade real deve ser MENOR que a efetiva atual para devolver ao estoque.")
+                elif devolver > max_devolver + 0.0001:
+                    st.error(f"Só é possível devolver até {fmt_num(max_devolver)} nesta retirada.")
+                else:
+                    try:
+                        tbl(sb, "ajustes").insert({
+                            "produto_id": mov["produto_id"],
+                            "movimentacao_id": mid,
+                            "tipo": "estorno_excesso",
+                            "quantidade": devolver,
+                            "quantidade_registrada": reg,
+                            "quantidade_correta": qtd_correta,
+                            "motivo": motivo.strip(),
+                            "responsavel_nome": resp.strip() or "Almoxarife",
+                        }).execute()
+                        obs = (mov.get("observacao") or "").strip()
+                        nova_obs = f"{obs} | CORR: {fmt_num(reg)}→{fmt_num(qtd_correta)} (-{fmt_num(devolver)})".strip(" |")
+                        tbl(sb, "movimentacoes").update({"observacao": nova_obs}).eq("id", mid).execute()
+                        st.cache_data.clear()
+                        st.success(f"Correção OK: {fmt_num(devolver)} devolvido(s) ao estoque.")
+                        st.rerun()
+                    except Exception as e:
+                        err = str(e)
+                        if "ajustes" in err.lower() and ("exist" in err.lower() or "PGRST" in err):
+                            st.error("Rode `sql/005_ajustes_correcao.sql` no Supabase SQL Editor.")
+                        else:
+                            st.error(f"Erro: {e}")
+            else:
+                baixar_mais = float(qtd_correta) - efet_atual
+                if baixar_mais <= 0:
+                    st.error("Quantidade real deve ser MAIOR que a efetiva atual.")
+                else:
+                    try:
+                        tbl(sb, "ajustes").insert({
+                            "produto_id": mov["produto_id"],
+                            "movimentacao_id": mid,
+                            "tipo": "correcao_saida_extra",
+                            "quantidade": baixar_mais,
+                            "quantidade_registrada": reg,
+                            "quantidade_correta": qtd_correta,
+                            "motivo": motivo.strip(),
+                            "responsavel_nome": resp.strip() or "Almoxarife",
+                        }).execute()
+                        st.cache_data.clear()
+                        st.success(f"Correção OK: mais {fmt_num(baixar_mais)} baixado(s) do estoque.")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Erro: {e}")
+
 # ══ TAB: Conciliação ═══════════════════════════════════════════════════════════
 with tab_conc:
     st.markdown('<div class="sec">Conciliação SIGALMOX × SAP</div>', unsafe_allow_html=True)
@@ -745,6 +924,9 @@ with tab_conc:
     else:
         sap_itens = []
     pend = carregar_pendencias(url_sb, key_sb)
+    ajustes_map_conc = carregar_ajustes_map(url_sb, key_sb)
+    for m in pend:
+        m["quantidade_efetiva"] = quantidade_efetiva(m, ajustes_map_conc)
     pend_cat = [m for m in pend if (m.get("produtos") or {}).get("categoria") == cat_conc]
 
     df_conc = calcular_conciliacao(produtos_cat, sap_itens, pend_cat)
